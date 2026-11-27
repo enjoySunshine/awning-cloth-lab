@@ -1,0 +1,54 @@
+name: Node.js Package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Git tag to publish'
+        required: true
+        type: string
+      is_prerelease:
+        description: 'Publish using the prerelease npm dist-tag'
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  publish-npm:
+    env:
+      NPM_CONFIG_PROVENANCE: true
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
+      IS_PRERELEASE: ${{ github.event_name == 'release' && github.event.release.prerelease || inputs.is_prerelease || false }}
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.10
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org/
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Validate release versions and npm tag
+        run: |
+          node --test scripts/publish.test.mjs
+          node scripts/publish.mjs "$RELEASE_TAG" "$IS_PRERELEASE"
+      - name: Install system deps for node canvas
+        run: sudo apt-get update && sudo apt-get install --yes libgif-dev libpng-dev libpango1.0-dev libjpeg-dev librsvg2-dev libcairo2-dev
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm run build
+      - name: Smoke test packages
+        run: pnpm run smoke:packages
+      - name: Publish packages
+        run: node scripts/publish.mjs "$RELEASE_TAG" "$IS_PRERELEASE" --publish
